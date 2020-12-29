@@ -391,7 +391,7 @@ class InputTUI():
             if len(term._keyboard_buf) > 1:
                 term._keyboard_buf = deque([term._keyboard_buf.pop()])
 
-            inp = term.inkey(1/60)
+            inp = term.inkey(1/15)
 
             pressed_key = None
             if inp.is_sequence:
@@ -567,7 +567,7 @@ class InputTUI():
             else:
                 self.controller.render_controller()
             self.check_for_disconnect(term)
-            time.sleep(1/120)
+            time.sleep(1/15)
 
     def render_start_screen(self, term, loading_text):
 

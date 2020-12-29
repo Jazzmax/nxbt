@@ -166,11 +166,11 @@ class ControllerServer():
                 # Sleep timers are compensated with the elapsed command
                 # processing time.
                 if self.controller_type == ControllerTypes.PRO_CONTROLLER:
-                    if elapsed_time < 1/120:
-                        time.sleep(1/120 - elapsed_time)
+                    if elapsed_time < 1/15:
+                        time.sleep(1/15 - elapsed_time)
                 else:
-                    if elapsed_time < 1/60:
-                        time.sleep(1/60 - elapsed_time)
+                    if elapsed_time < 1/15:
+                        time.sleep(1/15 - elapsed_time)
 
     def save_connection(self, error, state=None):
 
