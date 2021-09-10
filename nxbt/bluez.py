@@ -5,6 +5,7 @@ import time
 import logging
 from shutil import which
 import random
+from pathlib import Path
 
 import dbus
 
@@ -109,31 +110,33 @@ def toggle_clean_bluez(toggle):
     """
 
     service_path = "/lib/systemd/system/bluetooth.service"
-    service = None
-    with open(service_path, "r") as f:
-        service = f.read()
+    override_dir = Path("/run/systemd/system/bluetooth.service.d")
+    override_path = override_dir / "nxbt.conf"
 
-    # Find the bluetooth service execution line
-    lines = service.split("\n")
-    for i in range(0, len(lines)):
-        line = lines[i]
-        if line.startswith("ExecStart="):
-            # If we want to ensure the plugin is enabled
-            if not toggle:
-                # If input is already enabled
-                if "--compat --noplugin=*" not in line:
-                    return
-                lines[i] = re.sub(" --compat --noplugin=\*", "", line)
+    if toggle:
+        if override_path.is_file():
+            # Override exist, no need to restart bluetooth
+            return
+
+        with open(service_path) as f:
+            for line in f:
+                if line.startswith("ExecStart="):
+                    exec_start = line.strip() + " --compat --noplugin=*"
+                    break
             else:
-                # If input is already disabled
-                if "--compat --noplugin=*" in line:
-                    return
-                # If not, add the flag
-                lines[i] = line + " --compat --noplugin=*"
+                raise Exception("systemd service file doesn't have a ExecStart line")
 
-    service = "\n".join(lines)
-    with open(service_path, "w") as f:
-        f.write(service)
+        override = f"[Service]\nExecStart=\n{exec_start}"
+
+        override_dir.mkdir(parents=True, exist_ok=True)
+        with override_path.open("w") as f:
+            f.write(override)
+    else:
+        try:
+            os.remove(override_path)
+        except FileNotFoundError:
+            # Override doesn't exist, no need to restart bluetooth
+            return
 
     # Reload units
     _run_command(["systemctl", "daemon-reload"])
@@ -262,7 +265,7 @@ def replace_mac_addresses(adapter_paths, addresses):
         _run_command(['hciconfig', adapter_id, 'reset'])
 
 
-def find_devices_by_alias(alias):
+def find_devices_by_alias(alias, return_path=False, created_bus=None):
     """Finds the Bluetooth addresses of devices
     that have a specified Bluetooth alias. Aliases
     are converted to uppercase before comparison
@@ -274,7 +277,10 @@ def find_devices_by_alias(alias):
     :rtype: string or None
     """
 
-    bus = dbus.SystemBus()
+    if created_bus is not None:
+        bus = created_bus
+    else:
+        bus = dbus.SystemBus()
     # Find all connected/paired/discovered devices
     devices = find_objects(
         bus,
@@ -282,6 +288,7 @@ def find_devices_by_alias(alias):
         DEVICE_INTERFACE)
 
     addresses = []
+    matching_paths = []
     for path in devices:
         # Get the device's address and paired status
         device_props = dbus.Interface(
@@ -297,9 +304,16 @@ def find_devices_by_alias(alias):
         # Check for an address match
         if device_alias.upper() == alias.upper():
             addresses.append(device_addr)
+            matching_paths.append(path)
 
-    bus.close()
-    return addresses
+    # Close the dbus connection if we created one
+    if created_bus is None:
+        bus.close()
+
+    if return_path:
+        return addresses, matching_paths
+    else:
+        return addresses
 
 
 class BlueZ():
@@ -825,3 +839,38 @@ class BlueZ():
             return path
 
         return None
+    
+    def find_connected_devices(self, alias_filter=False):
+        """Finds the D-Bus path to a device that contains the
+        specified address.
+
+        :param address: The Bluetooth MAC address
+        :type address: string
+        :return: The path to the D-Bus object or None
+        :rtype: string or None
+        """
+
+        devices = find_objects(
+            self.bus,
+            SERVICE_NAME,
+            DEVICE_INTERFACE)
+        conn_devices = []
+        for path in devices:
+            # Get the device's connection status
+            device_props = dbus.Interface(
+                self.bus.get_object(SERVICE_NAME, path),
+                "org.freedesktop.DBus.Properties")
+            device_conn_status = device_props.Get(
+                DEVICE_INTERFACE,
+                "Connected")
+            device_alias = device_props.Get(
+                DEVICE_INTERFACE,
+                "Alias").upper()
+
+            if device_conn_status:
+                if alias_filter and device_alias == alias_filter.upper():
+                    conn_devices.append(path)
+                else:
+                    conn_devices.append(path)
+
+        return conn_devices
