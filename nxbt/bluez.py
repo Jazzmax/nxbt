@@ -109,12 +109,25 @@ def toggle_clean_bluez(toggle):
     :raises Exception: If sdptool, hciconfig, or hcitool are not available.
     """
 
+    logger = logging.getLogger('nxbt')
+
+    # Check systemd is present
+    res = _run_command(["ps", "--no-headers", "-o", "comm", "1"])
+    if res.stdout.decode("utf-8").strip() != "systemd":
+        logger.debug("systemd not found")
+        return
+
     service_path = "/lib/systemd/system/bluetooth.service"
+    runtime_override_dir = Path("/run/systemd/system/bluetooth.service.d")
+    permanent_override_dir = Path("/etc/systemd/system/bluetooth.service.d")
+    runtime_override_path = runtime_override_dir / "nxbt.conf"
+    permanent_override_path = permanent_override_dir / "nxbt.conf"
+
     override_dir = Path("/run/systemd/system/bluetooth.service.d")
     override_path = override_dir / "nxbt.conf"
 
     if toggle:
-        if override_path.is_file():
+        if runtime_override_path.is_file() or permanent_override_path.is_file():
             # Override exist, no need to restart bluetooth
             return
 
@@ -128,12 +141,12 @@ def toggle_clean_bluez(toggle):
 
         override = f"[Service]\nExecStart=\n{exec_start}"
 
-        override_dir.mkdir(parents=True, exist_ok=True)
-        with override_path.open("w") as f:
+        runtime_override_dir.mkdir(parents=True, exist_ok=True)
+        with runtime_override_path.open("w") as f:
             f.write(override)
     else:
         try:
-            os.remove(override_path)
+            os.remove(runtime_override_path)
         except FileNotFoundError:
             # Override doesn't exist, no need to restart bluetooth
             return
@@ -146,6 +159,8 @@ def toggle_clean_bluez(toggle):
 
     # Kill a bit of time here to ensure all services have restarted
     time.sleep(0.5)
+
+    logger.debug("systemd found and bluetooth reloaded")
 
 
 def clean_sdp_records():

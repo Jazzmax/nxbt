@@ -6,10 +6,10 @@ from socket import gethostname
 
 from .cert import generate_cert
 from ..nxbt import Nxbt, PRO_CONTROLLER
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, redirect, url_for, abort
 from flask_socketio import SocketIO, emit
 import eventlet
-
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__,
             static_url_path='',
@@ -36,11 +36,25 @@ sio = SocketIO(app, cookie=False)
 user_info_lock = RLock()
 USER_INFO = {}
 
+app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024
+app.config['UPLOAD_EXTENSIONS'] = ['.txt']
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
+@app.route('/', methods=['POST'])
+def upload_files():
+    uploaded_file = request.files['file']
+    filename = secure_filename(uploaded_file.filename)
+    if filename != '':
+        file_ext = os.path.splitext(filename)[1]
+        if file_ext not in app.config['UPLOAD_EXTENSIONS']:
+            abort(400)
+        line = uploaded_file.read()
+        sio.emit('loadmacro', str(line, 'utf-8'))
+        print("Macro loaded from file")
+    return '', 204
 
 @sio.on('connect')
 def on_connect():
@@ -79,7 +93,9 @@ def on_create_controller():
 
     try:
         reconnect_addresses = nxbt.get_switch_addresses()
-        index = nxbt.create_controller(PRO_CONTROLLER, reconnect_address=reconnect_addresses)
+        index = nxbt.create_controller(PRO_CONTROLLER,
+                                       reconnect_address=reconnect_addresses,
+                                       frequency=132)
 
         with user_info_lock:
             USER_INFO[request.sid]["controller_index"] = index
@@ -96,7 +112,6 @@ def handle_input(message):
     index = message[0]
     input_packet = message[1]
     nxbt.set_controller_input(index, input_packet)
-
 
 @sio.on('macro')
 def handle_macro(message):
